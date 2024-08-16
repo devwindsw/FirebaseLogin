@@ -45,14 +45,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             FirebaseLoginTheme {
-                //userViewModel.user.observe(this) { user: FirebaseUser -> updateIdentification(user) }
                 SignIn (userViewModel, { email: String, passwd: String -> onClick(email, passwd) })
             }
         }
     }
 
     private fun onClick(email: String, passwd: String) {
-        println("E-mail address is ${email} and password is ${passwd}.")
+        val msg: String = "E-mail address is ${email} and password is ${passwd}."
+        Toast.makeText(baseContext, msg, Toast.LENGTH_LONG,).show()
+        Log.i(TAG, "onClick " + msg)
     }
 
     public override fun onStart() {
@@ -62,7 +63,6 @@ class MainActivity : ComponentActivity() {
         val currentUser = auth.currentUser
         if (currentUser == null) {
             Log.i(TAG, "onStart no user")
-            userViewModel.updateUserFailed()
             return
         }
         currentUser.reload().addOnCompleteListener { task ->
