@@ -133,7 +133,6 @@ class MainActivity : ComponentActivity() {
             }
     }
 
-
     private fun signOut() {
         auth.signOut()
         logIdentification(auth.currentUser)
