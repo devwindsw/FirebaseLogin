@@ -18,21 +18,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import com.devwindsw.firebaselogin.ui.theme.FirebaseLoginTheme
-import com.google.common.base.Strings.isNullOrEmpty
+import com.google.android.gms.tasks.OnCompleteListener
+import com.google.firebase.auth.AuthCredential
+import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
+
 
 private const val TAG = "MainActivity"
 
@@ -51,14 +53,15 @@ class MainActivity : ComponentActivity() {
                 SignInView (userViewModel,
                     { email: String, passwd: String -> onSignin(email, passwd) },
                     { email: String, passwd: String -> onJoin(email, passwd) },
-                    { onVerify() }, { onSignout() })
+                    { onVerify() }, { onSignout() },
+                    { email: String, passwd: String -> onDelete(email, passwd) })
             }
         }
     }
 
     private fun onSignin(email: String, password: String) {
         val msg: String = "E-mail address is ${email} and password is ${password}."
-        Toast.makeText(baseContext, msg, Toast.LENGTH_LONG,).show()
+        Toast.makeText(baseContext, msg, Toast.LENGTH_LONG).show()
         Log.i(TAG, "onSignin " + msg)
         signIn(email, password)
     }
@@ -66,7 +69,7 @@ class MainActivity : ComponentActivity() {
 
     private fun onJoin(email: String, password: String) {
         val msg: String = "E-mail address is ${email} and password is ${password}."
-        Toast.makeText(baseContext, msg, Toast.LENGTH_LONG,).show()
+        Toast.makeText(baseContext, msg, Toast.LENGTH_LONG).show()
         Log.i(TAG, "onJoin " + msg)
         join(email, password)
     }
@@ -76,7 +79,7 @@ class MainActivity : ComponentActivity() {
         val currentUser = auth.currentUser
         if (currentUser == null) {
             Log.i(TAG, "onVerify no user")
-            Toast.makeText(baseContext, "No user to verify email.", Toast.LENGTH_SHORT,).show()
+            Toast.makeText(baseContext, "No user to verify email.", Toast.LENGTH_SHORT).show()
             return
         }
         if (currentUser.isEmailVerified) {
@@ -92,6 +95,21 @@ class MainActivity : ComponentActivity() {
         signOut()
     }
 
+    private fun onDelete(email: String, password: String) {
+        Log.i(TAG, "onDelete email=${email}, password=${password}")
+
+        val token: String? = null
+        val currentUser = auth.currentUser
+        if (currentUser == null) {
+            Log.w(TAG, "onDelete no user")
+            return
+        }
+        if (currentUser.email == null || currentUser.email != email) {
+            Log.w(TAG, "onDelete email mismatch")
+            return
+        }
+        deleteUser(currentUser, password, token)
+    }
     public override fun onStart() {
         Log.i(TAG, "onStart")
         super.onStart()
@@ -126,7 +144,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     // If sign in fails, display a message to the user.
                     Log.w(TAG, "signInWithEmail:failure", task.exception)
-                    Toast.makeText(baseContext, "Authentication failed.", Toast.LENGTH_SHORT,).show()
+                    Toast.makeText(baseContext, "Authentication failed.", Toast.LENGTH_SHORT).show()
                     //checkForMultiFactorFailure(task.exception!!)
                 }
                 logIdentification(auth.currentUser)
@@ -148,7 +166,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     // If sign in fails, display a message to the user.
                     Log.w(TAG, "createUserWithEmail:failure", task.exception)
-                    Toast.makeText(baseContext, "Authentication failed.", Toast.LENGTH_SHORT,).show()
+                    Toast.makeText(baseContext, "Authentication failed.", Toast.LENGTH_SHORT).show()
                 }
                 logIdentification(auth.currentUser)
             }
@@ -161,9 +179,60 @@ class MainActivity : ComponentActivity() {
                     Log.d(TAG, "sendEmailVerification:success")
                 } else {
                     Log.e(TAG, "sendEmailVerification", task.exception)
-                    Toast.makeText(baseContext, "Failed to send verification email.", Toast.LENGTH_LONG,).show()
+                    Toast.makeText(
+                        baseContext,
+                        "Failed to send verification email.",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
+    }
+
+    // From https://stackoverflow.com/questions/38114689/how-to-delete-a-firebase-user-from-android-app
+    // TODO Please refer to https://stackoverflow.com/questions/77479652/firebase-authentication-account-removal
+    private fun deleteUser(user: FirebaseUser, password: String?, token: String?) {
+        if (user.email == null) {
+            Log.w(TAG, "remove no valid email")
+            return
+        }
+
+        if (password == null && token == null) {
+            Log.w(TAG, "both password and token are null")
+            return
+        }
+
+        //You need to get here the token you saved at logging-in time.
+        //String token = "userSavedToken"
+
+        var credential: AuthCredential? = null
+
+        if (token == null) {
+            credential = EmailAuthProvider.getCredential(user.email!!, password!!)
+        } else {
+            //Doesn't matter if it was Facebook Sign-in or others. It will always work using GoogleAuthProvider for whatever the provider.
+            credential = GoogleAuthProvider.getCredential(token, null)
+        }
+
+        //We have to reauthenticate user because we don't know how long
+        //it was the sign-in. Calling reauthenticate, will update the
+        //user login and prevent FirebaseException (CREDENTIAL_TOO_OLD_LOGIN_AGAIN) on user.delete()
+        user.reauthenticate(credential).addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                Log.i(TAG, "reauthentication:success")
+                user.delete()
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            Log.i(TAG, "delete:success")
+                        } else {
+                            Log.e(TAG, "delete", task.exception)
+                        }
+                        logIdentification(auth.currentUser)
+                    }
+            } else {
+                Log.e(TAG, "reauthentication", task.exception)
+                logIdentification(auth.currentUser)
+            }
+        }
     }
 }
 
@@ -192,7 +261,8 @@ class UserViewModel : ViewModel() {
 fun SignInView(viewModel: UserViewModel,
                onSignin: (String, String) -> Unit,
                onJoin: (String, String) -> Unit,
-               onVerify: () -> Unit, onSignout: () -> Unit) {
+               onVerify: () -> Unit, onSignout: () -> Unit,
+               onDelete: (String, String) -> Unit) {
     val user by viewModel.user.observeAsState()
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -229,6 +299,9 @@ fun SignInView(viewModel: UserViewModel,
             }
             FilledTonalButton(onClick = { onSignout() }) {
                 Text("Sign out")
+            }
+            FilledTonalButton(onClick = { onDelete(email, password) }) {
+                Text("Delete")
             }
         }
     }
